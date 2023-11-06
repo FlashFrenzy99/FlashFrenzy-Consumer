@@ -10,6 +10,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -34,34 +35,35 @@ public class OrderConsumer {
     private final OrderProductService orderProductService;
 
     @KafkaListener(topics = "order", groupId = "group_1")
-    public void listener(String orderRequest) throws JsonProcessingException {
-
+    public void listener(ConsumerRecord data) throws JsonProcessingException {
+        log.debug(data.toString());
         long startTime = System.currentTimeMillis();
-        List<OrderProduct> orderProductList = Arrays.asList(objectMapper.readValue(orderRequest, OrderProduct[].class));
-
+        List<OrderProduct> orderProductList = Arrays.asList(objectMapper.readValue(data.value().toString(), OrderProduct[].class));
         Set<Long> eventIdList = getEventIdSet();
-
         for (OrderProduct orderProduct : orderProductList) {
+            long startTime2 = System.currentTimeMillis();
 
 
             Long productId = orderProduct.getProduct().getId();
             RLock lock = redissonClient.getLock("product" + productId);
             try {
-                boolean available = lock.tryLock(20, 5, TimeUnit.SECONDS);
-
+                boolean available = lock.tryLock(1, 3, TimeUnit.SECONDS);
                 if (!available) {
                     log.error("주문 시도 중 lock 획득 실패");
                     orderProductService.updateStatus(orderProduct.getId(), StatusEnum.FAIL);
                     continue;
                 }
 
+                log.debug("락 elapsed time : "  + (System.currentTimeMillis() - startTime2) + "ms.");
+                startTime2 = System.currentTimeMillis();
                 stockService.decrease(productId, orderProduct.getCount());
-
+                log.debug("재고 감소 elapsed time : "  + (System.currentTimeMillis() - startTime2) + "ms.");
+                startTime2 = System.currentTimeMillis();
                 if (eventIdList.contains(productId)) {
                     redisRepository.decrement("product:sale:" + productId + ":stock", orderProduct.getCount());
                 }
                 orderProductService.updateStatus(orderProduct.getId(), StatusEnum.SUCCESS);
-
+                log.debug("성공 처리 elapsed time : "  + (System.currentTimeMillis() - startTime2) + "ms.");
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             } catch (IllegalArgumentException e) {
