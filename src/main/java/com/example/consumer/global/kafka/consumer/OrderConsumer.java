@@ -34,7 +34,7 @@ public class OrderConsumer {
     private final EventRepository eventRepository;
     private final OrderProductService orderProductService;
 
-    @KafkaListener(topics = "order", groupId = "group_1")
+    @KafkaListener(topics = "order-2", groupId = "group_1")
     public void listener(ConsumerRecord data) throws JsonProcessingException {
         log.debug(data.toString());
         long startTime = System.currentTimeMillis();
